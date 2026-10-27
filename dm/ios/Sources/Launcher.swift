@@ -67,7 +67,10 @@ private struct SettingRow: View {
 private struct LauncherView: View {
     @ObservedObject var m: LauncherModel
     let play: () -> Void
+    @AppStorage("launcher.showSideArtwork") private var showSideArtwork = false
     @State private var memory = os_proc_available_memory()
+    @State private var recheckRequested = false
+    @State private var showRecheckAlert = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -82,7 +85,7 @@ private struct LauncherView: View {
                         .font(.title.weight(.bold)).multilineTextAlignment(.center)
                     Text("Version \((info("CFBundleShortVersionString") as? String) ?? "")")
                         .font(.callout).foregroundStyle(.secondary)
-                    playButton
+                    playButton.disabled(recheckRequested)
                 }
                 .padding(16)
                 .frame(width: geometry.size.width / 3, height: geometry.size.height)
@@ -92,6 +95,30 @@ private struct LauncherView: View {
                             ForEach(m.settings.filter { $0.sectionTitle == section }) { SettingRow(s: $0, m: m) }
                         }
                     }
+                if Bundle.main.url(forResource: "side-background-left", withExtension: "png") != nil || Bundle.main.url(forResource: "side-background-right", withExtension: "png") != nil {
+                    Section {
+                        Toggle("Side artwork", isOn: $showSideArtwork)
+                    } footer: {
+                        Text("Show cover artwork beside the game. Off keeps the side areas black. Your choice is saved.")
+                    }
+                }
+                if Bundle.main.url(forResource: "external-data", withExtension: "json") != nil {
+                    Section {
+                        Button("Recheck game resources") {
+                            let doc = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                            do {
+                                try Data().write(to: doc.appendingPathComponent("recheck-data.txt"), options: .atomic)
+                                recheckRequested = true
+                            } catch { recheckRequested = false }
+                            showRecheckAlert = true
+                        }
+                        .alert(recheckRequested ? "Restart to verify resources" : "Could not schedule verification", isPresented: $showRecheckAlert) {
+                            Button("OK", role: .cancel) { }
+                        } message: {
+                            Text(recheckRequested ? "Close the app completely and reopen it. A full resource check will run before the game starts." : "Check available storage and try again.")
+                        }
+                    } footer: { Text("Resources are verified once. Use this after replacing files or if you suspect corruption.") }
+                }
                     Section {
                         Button("Reset to tested defaults") { m.reset() }
                             .disabled(!m.changed)

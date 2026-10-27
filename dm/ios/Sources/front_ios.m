@@ -14,6 +14,8 @@ UIView *dm_gamepad_view(CGRect frame);
 void dm_gamepad_reset(void);
 void front_ios_boot(void);
 int front_ios_boot_ok(void);
+bool front_ios_external_data(void);
+void front_ios_prepare_external(void (^progress)(NSUInteger, NSUInteger), void (^done)(NSString *));
 bool dm_show_launcher(void *view_controller, void (*done)(void));   // Launcher.swift: false = no launcher (no dm/launcher.json, or DM_LAUNCHER=0)
 
 static CAMetalLayer *g_layer;
@@ -45,7 +47,11 @@ static UILabel *front_ios_fps_label(void);
 @property (nonatomic, strong) DmGameView *game;
 @property (nonatomic, strong) UIView *pad;
 @property (nonatomic, strong) UILabel *fps;
+@property (nonatomic, strong) UIImageView *leftBackdrop;
+@property (nonatomic, strong) UIImageView *rightBackdrop;
 @property (nonatomic) BOOL launched;
+@property (nonatomic, strong) UILabel *dataStatus;
+@property (nonatomic, strong) UIButton *dataRetry;
 - (void)startGame;
 @end
 static DmRootVC *g_root;
@@ -55,6 +61,22 @@ static void launcher_done(void) { [g_root startGame]; }
     [super viewDidLoad];
     self.view.backgroundColor = UIColor.blackColor;
     front_ios_power_watch();
+    if (front_ios_external_data()) {
+        UIStackView *stack = [[UIStackView alloc] init]; stack.axis = UILayoutConstraintAxisVertical;
+        stack.spacing = 24; stack.translatesAutoresizingMaskIntoConstraints = NO;
+        self.dataStatus = [UILabel new]; self.dataStatus.numberOfLines = 0;
+        self.dataStatus.textColor = UIColor.whiteColor; self.dataStatus.textAlignment = NSTextAlignmentCenter;
+        self.dataStatus.text = @"Copy the romfs and aoc folders into this app using Files or Finder file sharing.\nThen tap Check and Start. Keep the app open during the first check.";
+        self.dataRetry = [UIButton buttonWithType:UIButtonTypeSystem];
+        [self.dataRetry setTitle:@"Check and Start" forState:UIControlStateNormal];
+        [self.dataRetry addTarget:self action:@selector(checkExternalData) forControlEvents:UIControlEventTouchUpInside];
+        [stack addArrangedSubview:self.dataStatus]; [stack addArrangedSubview:self.dataRetry]; [self.view addSubview:stack];
+        [NSLayoutConstraint activateConstraints:@[[stack.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor],
+            [stack.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
+            [stack.widthAnchor constraintEqualToAnchor:self.view.widthAnchor multiplier:0.8]]];
+        [self checkExternalData];
+        return;
+    }
     if (!front_ios_boot_ok()) {   // No game files: show a hint and do not start the host
         UILabel *lb = [[UILabel alloc] initWithFrame:CGRectInset(self.view.bounds, 40, 40)];
         lb.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
@@ -64,10 +86,38 @@ static void launcher_done(void) { [g_root startGame]; }
     }
     front_ios_audio_watch();
 }
+- (void)checkExternalData {
+    self.dataRetry.enabled = NO; UIApplication.sharedApplication.idleTimerDisabled = YES;
+    self.dataStatus.text = @"Checking resources... The first check reads all game data.";
+    front_ios_prepare_external(^(NSUInteger n, NSUInteger total) {
+        if (n % 32 && n != total) return;
+        dispatch_async(dispatch_get_main_queue(), ^{ self.dataStatus.text = [NSString stringWithFormat:@"Checking resources: %lu / %lu", (unsigned long)n, (unsigned long)total]; });
+    }, ^(NSString *error) {
+        UIApplication.sharedApplication.idleTimerDisabled = NO;
+        if (error) { self.dataStatus.text = [error stringByAppendingString:@"\nFinish copying the matching resource pack, then retry."]; self.dataRetry.enabled = YES; return; }
+        [self.dataStatus.superview removeFromSuperview]; self.launched = YES; g_root = self;
+        front_ios_audio_watch();
+        if (!dm_show_launcher((__bridge void *)self, launcher_done)) [self startGame];
+    });
+}
 // The game view, the pad and the frame-rate counter are made once the launcher has set the switches they read (DM_SHOW_FPS, DM_METAL_HUD); the host's loading began at app launch (main.m)
 - (void)startGame {
     if (self.game) return;
     front_hud_env();   // before the game view makes its device (an env file's DM_METAL_HUD sets it in main.m already)
+    // Optional preprocessed side artwork; never intercept gamepad input.
+    NSArray<NSString *> *artNames = [[NSUserDefaults standardUserDefaults] boolForKey:@"launcher.showSideArtwork"] ? @[@"side-background-left", @"side-background-right"] : @[];
+    for (NSUInteger i = 0; i < artNames.count; i++) {
+        NSString *path = [NSBundle.mainBundle pathForResource:artNames[i] ofType:@"png"];
+        UIImage *image = path ? [UIImage imageWithContentsOfFile:path] : nil;
+        if (!image) continue;
+        UIImageView *art = [[UIImageView alloc] initWithImage:image];
+        art.contentMode = UIViewContentModeScaleAspectFill;
+        art.clipsToBounds = YES;
+        art.userInteractionEnabled = NO;
+        art.isAccessibilityElement = NO;
+        [self.view addSubview:art];
+        if (i == 0) self.leftBackdrop = art; else self.rightBackdrop = art;
+    }
     self.game = [[DmGameView alloc] initWithFrame:self.view.bounds];
     [self.view addSubview:self.game];
     g_layer = (CAMetalLayer *)self.game.layer;
@@ -88,6 +138,11 @@ static void launcher_done(void) { [g_root startGame]; }
     CGFloat w = b.size.width, h = b.size.height;   // Fit 16:9 into the whole screen
     if (w / h > 16.0 / 9.0) w = h * 16.0 / 9.0; else h = w * 9.0 / 16.0;
     self.game.frame = CGRectMake(floor((b.size.width - w) / 2), floor((b.size.height - h) / 2), w, h);
+    CGFloat leftWidth = CGRectGetMinX(self.game.frame), rightX = CGRectGetMaxX(self.game.frame);
+    self.leftBackdrop.frame = CGRectMake(0, 0, leftWidth, b.size.height);
+    self.rightBackdrop.frame = CGRectMake(rightX, 0, MAX(0, b.size.width - rightX), b.size.height);
+    self.leftBackdrop.hidden = leftWidth < 1;
+    self.rightBackdrop.hidden = b.size.width - rightX < 1;
     if (self.fps) {   // the top row's free stretch: right of DmGamepad.m's L3 key (102 + 17 of its units from the safe edge), level with − / + (22 units down); u is its unit
         CGRect s = UIEdgeInsetsInsetRect(b, self.view.safeAreaInsets); CGFloat u = MIN(b.size.height / 430.0, 1.3);
         self.fps.frame = CGRectMake(floor(CGRectGetMinX(s) + 130 * u), floor(CGRectGetMinY(s) + 22 * u - 11), 64, 22);
@@ -95,7 +150,7 @@ static void launcher_done(void) { [g_root startGame]; }
 }
 - (void)viewDidAppear:(BOOL)a {
     [super viewDidAppear:a];
-    if (self.launched || !front_ios_boot_ok()) return;
+    if (front_ios_external_data() || self.launched || !front_ios_boot_ok()) return;
     self.launched = YES; g_root = self;
     if (!dm_show_launcher((__bridge void *)self, launcher_done)) [self startGame];   // the settings screen first (Launcher.swift), when the app has one
 }

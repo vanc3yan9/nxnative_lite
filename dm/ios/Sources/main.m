@@ -5,6 +5,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <unistd.h>
+#import "DmExternalData.h"
 #include "game_profile.h"   // game profile constants (the RomFS marker path)
 #include "front.h"
 
@@ -29,7 +30,7 @@ static int boot_env(void) {
     NSString *res = NSBundle.mainBundle.resourcePath;
     for (NSString *d in @[@"save", @"temp"]) [fm createDirectoryAtPath:[doc stringByAppendingPathComponent:d] withIntermediateDirectories:YES attributes:nil error:nil];
     // Keep game files and scratch data out of device backups (Documents is backed up by default; a RomFS placed there is many GB). Saves, logs and the pipeline list stay in the backup
-    for (NSString *d in @[@"romfs", @"temp"]) {
+    for (NSString *d in @[@"romfs", @"aoc", @"temp"]) {
         NSURL *u = [NSURL fileURLWithPath:[doc stringByAppendingPathComponent:d] isDirectory:YES]; NSError *e = nil;
         if ([fm fileExistsAtPath:u.path] && ![u setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:&e]) fprintf(stderr, "boot: %s could not be excluded from backup: %s\n", d.UTF8String, e.localizedDescription.UTF8String);
     }
@@ -65,7 +66,8 @@ static int boot_env(void) {
     setenv("DM_NVN_SHMAP", [dm stringByAppendingPathComponent:@"shader_map.tsv"].fileSystemRepresentation, 0);
     setenv("DM_MSL_DIR", [res stringByAppendingPathComponent:@"msl"].fileSystemRepresentation, 0);
     setenv("DM_FONT_DIR", [dm stringByAppendingPathComponent:@"font"].fileSystemRepresentation, 0);   // Shared-font stand-ins (standard.ttf / nintendo_ext.ttf): iOS lacks the macOS font path
-    NSString *aoc = [res stringByAppendingPathComponent:@"aoc"];   // add-on content: build_ipa.sh puts the RomFS extracted from the player's DLC NSPs at <App>/aoc/<index>/
+    NSString *aoc = [doc stringByAppendingPathComponent:@"aoc"];
+    if (![fm fileExistsAtPath:aoc]) aoc = [res stringByAppendingPathComponent:@"aoc"];   // add-on content: build_ipa.sh puts the RomFS extracted from the player's DLC NSPs at <App>/aoc/<index>/
     if ([fm fileExistsAtPath:aoc]) setenv("DM_AOC_DIR", aoc.fileSystemRepresentation, 0);
     NSString *pso = [res stringByAppendingPathComponent:@"pso"];   // the pipeline archive made offline (build_ipa.sh, dm/gfx/tools/pso_offline.py): the shader pairs' bases, which the device then does not build
     if ([fm fileExistsAtPath:pso]) setenv("DM_PSO_BUNDLE", pso.fileSystemRepresentation, 0);
@@ -90,6 +92,37 @@ void front_ios_boot(void) {   // Called by front_ios.m once the window and Metal
     pthread_t t; pthread_create(&t, &a, boot_thread, NULL); pthread_detach(t);
 }
 int front_ios_boot_ok(void) { return g_boot_ok; }
+bool front_ios_external_data(void) { return [NSBundle.mainBundle pathForResource:@"external-data" ofType:@"json"] != nil; }
+void front_ios_prepare_external(void (^progress)(NSUInteger, NSUInteger), void (^done)(NSString *)) {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        @autoreleasepool {
+            NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
+            NSString *cache = NSSearchPathForDirectoriesInDomains(NSCachesDirectory, NSUserDomainMask, YES)[0];
+            [NSFileManager.defaultManager createDirectoryAtPath:cache withIntermediateDirectories:YES attributes:nil error:nil];
+            NSFileManager *fm = NSFileManager.defaultManager;
+            NSString *manifest = [NSBundle.mainBundle pathForResource:@"external-data" ofType:@"json"];
+            NSString *support = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES)[0];
+            [fm createDirectoryAtPath:support withIntermediateDirectories:YES attributes:nil error:nil];
+            NSString *receipt = [support stringByAppendingPathComponent:@"external-data-receipt.plist"];
+            NSString *oldCache = [cache stringByAppendingPathComponent:@"external-data-verified.plist"];
+            NSString *force = [doc stringByAppendingPathComponent:@"recheck-data.txt"];
+            if ([fm fileExistsAtPath:force]) {
+                [fm removeItemAtPath:receipt error:nil]; [fm removeItemAtPath:oldCache error:nil];
+                [fm removeItemAtPath:force error:nil];
+            }
+            // Existing successful checks migrate without rereading game data. Receipts
+            // live in Application Support so ordinary cache eviction cannot erase them.
+            BOOL ready = dm_external_receipt_matches(manifest, receipt) || dm_external_receipt_matches(manifest, oldCache);
+            if (![fm fileExistsAtPath:[doc stringByAppendingPathComponent:@"romfs/" @DM_GAME_ROMFS_MARKER]] ||
+                ![fm fileExistsAtPath:[doc stringByAppendingPathComponent:@"aoc"]]) ready = NO;
+            NSString *error = nil;
+            if (!ready) error = dm_validate_external_data(doc, manifest, oldCache, progress);
+            if (!error && !dm_write_external_receipt(manifest, receipt)) error = @"Cannot save resource verification. Please check free storage.";
+            if (!error) { g_boot_ok = boot_env(); if (!g_boot_ok) error = @"Game resources could not be loaded."; }
+            dispatch_async(dispatch_get_main_queue(), ^{ done(error); });
+        }
+    });
+}
 
 @interface App : UIResponder <UIApplicationDelegate>
 @end
@@ -116,6 +149,18 @@ int front_ios_boot_ok(void) { return g_boot_ok; }
 @end
 
 int main(int argc, char **argv) {
-    @autoreleasepool { g_boot_ok = boot_env(); }
+    @autoreleasepool {
+        if (!front_ios_external_data()) g_boot_ok = boot_env();
+        else {
+            NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES)[0];
+            for (NSString *name in @[@"romfs", @"aoc"]) {
+                NSURL *url = [NSURL fileURLWithPath:[doc stringByAppendingPathComponent:name] isDirectory:YES];
+                [NSFileManager.defaultManager createDirectoryAtURL:url withIntermediateDirectories:YES attributes:nil error:nil];
+                [url setResourceValue:@YES forKey:NSURLIsExcludedFromBackupKey error:nil];
+            }
+            NSString *hint = @"Copy the matching romfs and aoc resource folders here. Do not delete save. Open the app and tap Check and Start.\n";
+            [hint writeToFile:[doc stringByAppendingPathComponent:@"RESOURCE-INSTALL.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        }
+    }
     @autoreleasepool { return UIApplicationMain(argc, argv, nil, NSStringFromClass(App.class)); }
 }

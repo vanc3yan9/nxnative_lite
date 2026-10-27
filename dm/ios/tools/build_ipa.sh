@@ -24,6 +24,7 @@ gp() { python3 "$DM/games/game.py" "$GAME" "$1" || die "game profile $GD: $1"; }
 [ -n "${W:-}" ] || die "W is not set: W=<NSP folder>/$GAME-work (the game's work folder) $0"
 PKG=$(gp package)
 PATCHED=${PATCHED:-$W/build/patched_$PKG}; ROMFS=${ROMFS:-$W/data/$PKG/RomFS}; MSL_IOS=${MSL_IOS:-$W/build/ios/dmsh_b}; AOC=${AOC-$W/data/aoc}
+if [ "${DM_LITE:-0}" = 1 ] && [ "${1:-}" = --prepare-xcode ]; then die "lite mode currently requires IPA output"; fi
 PREPARE_XCODE=NO; [ "${1:-}" != --prepare-xcode ] || PREPARE_XCODE=YES
 OUT_IPA=${1:-$(dirname "$W")/$(gp ipa)}; O=$W/build/ios/pkg; DD=$O/dd
 XCODE_DD=${DM_XCODE_DERIVED_DATA:-$W/build/ios/xcode-dd}
@@ -151,7 +152,18 @@ APP=$DD/Build/Products/Release-iphoneos/DmIOS.app
 rm -rf "$APP/msl" "$O/Payload"   # Payload/: what the copy-and-zip packing left behind, as was out.ipa (and its index) unless it is the IPA packed here, which a repeat pack reuses
 [ "$O/out.ipa" -ef "$OUT_IPA" ] || rm -f "$O/out.ipa"; [ "$O/out.ipa.idx" -ef "$OUT_IPA.idx" ] || rm -f "$O/out.ipa.idx"
 P=Payload/DmIOS.app; MAPS=("$P/romfs=$ROMFS")
-if [ -n "$AOC" ] && [ -d "$AOC" ]; then MAPS+=("$P/aoc=$AOC"); t "add-on content: $(ls "$AOC" | tr '\n' ' ')"; fi
+rm -f "$APP/external-data.json" "$APP/side-background-left.png" "$APP/side-background-right.png"
+if [ "${DM_LITE:-0}" = 1 ]; then
+  LITE_AOC=(); if [ -n "$AOC" ] && [ -d "$AOC" ]; then LITE_AOC=(--aoc "$AOC"); fi
+  python3 tools/lite_resources.py --romfs "$ROMFS" "${LITE_AOC[@]+${LITE_AOC[@]}}" --archive "${OUT_IPA%.ipa}-data.zip" --manifest "$APP/external-data.json" --title "$GAME" --version "$DM_APP_VERSION" || die "export external resources"
+  MAPS=("$P/external-data.json=$APP/external-data.json")
+fi
+if [ -n "${DM_SIDE_ART_DIR:-}" ]; then
+  for side in left right; do
+    cp "$DM_SIDE_ART_DIR/side-background-$side.png" "$APP/side-background-$side.png" || die "copy side artwork"
+  done
+fi
+if [ "${DM_LITE:-0}" != 1 ] && [ -n "$AOC" ] && [ -d "$AOC" ]; then MAPS+=("$P/aoc=$AOC"); t "add-on content: $(ls "$AOC" | tr '\n' ' ')"; fi
 if [ -n "${PSO:-}" ]; then MAPS+=("$P/pso=$PSO"); fi
 MAPS+=("$P/msl/$MSLDIR=$MSL_IOS/$MSLDIR" "$P=$APP")
 t "pack IPA (already-compressed game files stored, everything else deflated)"

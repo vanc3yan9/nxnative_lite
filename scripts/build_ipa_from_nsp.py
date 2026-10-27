@@ -1794,6 +1794,8 @@ def parse_args(argv):
     ap.add_argument('-o', '--out', help='output IPA, or app with --platform mac-app (default: <the profile\'s ipa>, or <game name>.app, in the NSP folder)')
     ap.add_argument('--app-name', help='app name on the home screen (default: the game name in the base NSP)')
     ap.add_argument('--bundle-id', help='the app\'s bundle ID (default: saved Xcode ID when preparing again, else org.nxnative.<base game title ID in lowercase>)')
+    ap.add_argument('--lite', action='store_true', help='pack an unsigned shell IPA and a separate resource ZIP (iOS IPA output only)')
+    ap.add_argument('--side-art-dir', help='directory containing side-background-left.png and side-background-right.png; optional launcher toggle')
     ap.add_argument('--prepare-xcode', action='store_true', help='prepare a per-game Xcode project and add it to the shared workspace instead of packing an IPA (requires keeping extracted files)')
     ap.add_argument('--platform', choices=('ios', 'mac', 'mac-app'), help='ios = the IPA (or the Xcode project); mac = for development: build only what running the game on this Mac needs (the Mac shaders and the Mac host, '
                     'no iOS shaders, Xcode project or IPA), keep the extracted files and print the command that runs the game; mac-app = what mac builds, then a self-contained, double-clickable '
@@ -1848,6 +1850,9 @@ def main(args=None):
     here = Path(globals().get('__file__') or sys.argv[0]).resolve()
     repo = find_repo(here)
     prepare_xcode = args.prepare_xcode or PREPARE_XCODE
+    if args.lite and (prepare_xcode or (args.platform or PLATFORM) in ('mac', 'mac-app')):
+        raise BuildError('--lite requires iOS IPA output, without --prepare-xcode')
+
     platform = args.platform or PLATFORM
     if platform not in ('ios', 'mac', 'mac-app'): raise BuildError(f'PLATFORM / --platform must be ios, mac or mac-app: {platform}')
     mac = platform in ('mac', 'mac-app')   # the Mac's shaders and host only: no iOS shaders, Xcode project or IPA (mac_run prints the command; mac-app packs a Mac app, mac_app)
@@ -2063,6 +2068,8 @@ def main(args=None):
     if not prepare_xcode and free_gb(out_ipa.parent) < 5: raise BuildError(f'less than 5 GB free on the volume of {out_ipa.parent}')
     say('preparing the Xcode project' if prepare_xcode else f'building the IPA → {out_ipa}')
     ipa_env = dict(env, GAME=g.id, W=str(work / 'ipa'), PATCHED=str(patched), ROMFS=str(game / 'RomFS'), MSL_IOS=str(ios), GFXAPI=gfx, FONT_PY=py, DM_DISPLAY_NAME=app_name, DM_BUNDLE_ID=bundle_id, AOC=str(aoc or ''), DM_XCODE_DERIVED_DATA=str(work / 'xcode-derived-data'), DM_TEAM_ID=team_id, DM_LANG=lang)
+    if args.lite: ipa_env['DM_LITE'] = '1'
+    if args.side_art_dir: ipa_env['DM_SIDE_ART_DIR'] = str(Path(args.side_art_dir).expanduser().resolve())
     if prepare_xcode: ipa_env['DM_XCODE_PROJECT_DIR'] = str(project.parent)
     if app_version: ipa_env['DM_APP_VERSION'] = app_version
     if icon: ipa_env['DM_ICON'] = str(icon); say(f'app icon: {icon}')   # app icon (found above)

@@ -229,3 +229,5 @@ How it works, the script's options, running games on the Mac and adding a game: 
 ## License
 
 MIT (see [LICENSE](LICENSE)). Third-party code keeps its own license; see [dm/third_party](dm/third_party/README.md).
+
+Lightweight IPA plus external resources: see [lightweight installation](docs/lite-installation.md).
