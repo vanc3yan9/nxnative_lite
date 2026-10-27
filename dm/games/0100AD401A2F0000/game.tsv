@@ -1,0 +1,32 @@
+# ---- Identity ----
+title_id	0100AD401A2F0000
+program_id	0100AD401A2F0000
+
+# ---- App ----
+name	Wargroove 2
+ipa	Wargroove2.ipa
+app_category	public.app-category.games
+
+# ---- Versions ----
+build	v917504	1.2.9	main=f5bfc69d8bc0732383a513f3cda1ecde	subsdk0=220d36873cbb6d5dc39a9a37127ea80d	sdk=a5cb2175cad2ca2afdd4c13577dbd079
+package	v917504
+shader_versions	v917504
+
+# ---- Files ----
+# every module main imports from
+modules	main subsdk0 sdk
+romfs_marker	music.dat
+zip_store	.dat:.metallib
+
+# ---- Memory ----
+# main sets a heap of at most the pool − 64 MB: a 3328 MB heap region
+mem_reserve	0x100000000
+mem_alias	0x10000000
+mem_stack	0x10000000
+app_pool	0xCD500000
+# the NPDM declares 0 MB of system resource: IsVirtualAddressMemoryEnabled is false, as on Horizon (Big Brain Academy: Brain vs. Brain sets a heap only then)
+sys_resource	0x0
+
+# ---- Shader split ----
+shader_groups	/=romfs
+shader_note	Wargroove 2 shaders (provisional profile)

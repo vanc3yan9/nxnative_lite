@@ -60,7 +60,8 @@ static int test_output_lifetime(void) {
         buf[i] = mmap(NULL, page, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
         if (pcm[i] == MAP_FAILED || buf[i] == MAP_FAILED) return 1;
         memset(out, 0, sizeof out);
-        if (h_au_OpenDef0(out, prm)) return 1;
+        if (i & 1 ? h_au_Open0(out, "DeviceOut", prm) : h_au_OpenDef0(out, prm)) return 1;
+        if (ao(out)->event) { puts("FAIL polling AudioOut unexpectedly has a release event"); return 1; }
         if (out[0] != RATE || out[1] != 2 || out[2] != FMT_PCM16 || out[3] != STATE_STOPPED) {
             printf("FAIL AudioOut open: guest fields %u %u %u %u, expected %u 2 %u %u as the SDK writes them\n", out[0], out[1], out[2], out[3], RATE, FMT_PCM16, STATE_STOPPED); return 1;
         }

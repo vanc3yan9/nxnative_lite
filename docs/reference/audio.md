@@ -135,6 +135,13 @@ For a replaced DSP renderer the size query keeps the service's work-buffer contr
 
 ## AudioOut and devices
 
+### Named-device polling AudioOut
+
+- **Symptom:** startup aborts after `[RED] sf: the game connects to service audout:u itself, which the host does not serve`.
+- **Cause:** the host covered the event-taking named-device overload and both default-device overloads, but missed `OpenAudioOut(AudioOut*, const char*, const AudioOutParameter&)`. That SDK client attempted to create its real Horizon service session.
+- **Fix:** resolve that overload to the same host AudioOut implementation with a null release event. The caller polls released buffers, as with the default-device polling overload.
+- **Found on:** [Wargroove 2](../../dm/games/0100AD401A2F0000/README.md), SDK 16.2.6.
+
 ### Stopping an AudioOut releases its pending buffers
 
 - **Symptom:** FMOD waits for buffer release after stopping an AudioOut, hanging the game during a scene transition.

@@ -25,6 +25,13 @@ The SDK's movie library (`movie::Decoder`, `movie::Extractor`), which the host t
 - **Fix:** the host now sets everything the SDK's `DecoderImpl::GetOutputBufferFormatFromDecoder` (SDK 19 `subsdk0+0x121f50`) does: also `nv12-uv-stride`, the luma (Y) stride as for any NV12 picture, `nv12-width` and `nv12-height` (`md_format` in `hle_movie.c`).
 - **Found on:** [DRAGON QUEST VII Reimagined](../../dm/games/0100A9D01C446000/README.md) (the grey picture); [Catherine: Full Body](../../dm/games/0100BF00112C0000/README.md) (SDK 8.2.1, CRI middleware; one boot: the crash).
 
+### Decoded output MIME
+
+- **Symptom:** black screen and silence at the first movie; the main thread waits for video-format readiness even after decoding starts.
+- **Cause:** output metadata omitted `mime`. Halley's format callback dispatches on this string before publishing readiness; dimensions alone do not identify the decoded stream.
+- **Fix:** `md_format` sets `video/raw` for decoded video and `audio/raw` for decoded audio, using the SDK's `MediaData::SetString`. The movie test checks both output types.
+- **Found on:** [Wargroove 2](../../dm/games/0100AD401A2F0000/README.md) (Halley 3.3.48, SDK 16.2.6).
+
 ### SDK 4's `movie::Decoder` constructor without a priority
 
 - **Symptom:** a call through a null pointer in the host's `movie::Decoder::Configure` right after `nnMain` starts the logos.

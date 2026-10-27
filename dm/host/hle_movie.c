@@ -96,6 +96,7 @@ static struct {
     void *(*data)(const void *buf);
     size_t (*cap)(const void *buf);
     void (*set_i32)(void *md, const char *k, int v);
+    void (*set_string)(void *md, const char *k, const char *v);
     void (*set_rect)(void *md, const char *k, int l, int t, int r, int b);
     int (*find_i32)(const void *md, const char *k, int *v);
     int (*find_buf)(const void *md, const char *k, void **buf);
@@ -111,6 +112,7 @@ static void md_syms(void) {
     G.data = msym("_ZNK5movie6Buffer4DataEv");
     G.cap = msym("_ZNK5movie6Buffer8CapacityEv");
     G.set_i32 = msym("_ZN5movie9MediaData8SetInt32EPKci");
+    G.set_string = msym("_ZN5movie9MediaData9SetStringEPKcS2_");
     G.set_rect = msym("_ZN5movie9MediaData7SetRectEPKciiii");
     G.find_i32 = msym("_ZNK5movie9MediaData9FindInt32EPKcPi");
     G.find_buf = msym("_ZNK5movie9MediaData10FindBufferEPKcPPNS_6BufferE");
@@ -674,6 +676,9 @@ HLE_FORCE("_ZN5movie7Decoder24AcquireOutputBufferIndexEPiPlPjS1_", "movie decode
     return r;
 }
 static void md_format(mdec_t *d, void *md) {
+    // MediaCodec output formats identify the decoded media, too. Halley's
+    // format callback dispatches on mime before publishing video readiness.
+    G.set_string(md, "mime", MD_AUDIO(d) ? "audio/raw" : "video/raw");
     if (MD_AUDIO(d)) { G.set_i32(md, "channel-count", d->ch > 0 ? d->ch : 2); G.set_i32(md, "sample-rate", d->rate > 0 ? d->rate : 48000); return; }
     int w, h, stride, slice; md_dims(d, &w, &h, &stride, &slice);
     G.set_i32(md, "width", w); G.set_i32(md, "height", h);

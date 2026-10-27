@@ -32,7 +32,27 @@ static void decode(int type, int format, const uint8_t *packet, int size) {
     vpx_codec_destroy(&d.vpx);
     free(d.out[0].frm);
 }
+static const char *output_mime;
+static void format_string(void *md, const char *key, const char *value) {
+    (void)md;
+    if (!strcmp(key, "mime")) output_mime = value;
+}
+static void format_int(void *md, const char *key, int value) { (void)md; (void)key; (void)value; }
+static void format_rect(void *md, const char *key, int l, int t, int r, int b) {
+    (void)md; (void)key; (void)l; (void)t; (void)r; (void)b;
+}
+static void output_format(void) {
+    G.set_string = format_string; G.set_i32 = format_int; G.set_rect = format_rect;
+    mdec_t d = {.type = MD_TYPE_AVC, .fmt = MD_FMT_ABGR, .w = 16, .h = 16};
+    md_format(&d, NULL);
+    assert(output_mime && !strcmp(output_mime, "video/raw"));
+    output_mime = NULL;
+    d.type = MD_TYPE_AAC; d.fmt = MD_FMT_PCM16; d.ch = 2; d.rate = 48000;
+    md_format(&d, NULL);
+    assert(output_mime && !strcmp(output_mime, "audio/raw"));
+}
 int main(void) {
+    output_format();
     int w = 0, h = 0;
     assert(!vp8_size(vp8, 9, &w, &h));
     assert(vp8_size(vp8, sizeof vp8, &w, &h) && w == 16 && h == 16);
